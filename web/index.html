@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAGSieve · 知识投毒检测演示</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F6F7F9;
+    --surface: #FFFFFF;
+    --ink: #16181D;
+    --muted: #5A6270;
+    --faint: #8A93A2;
+    --line: #E5E8ED;
+    --line-strong: #D3D8E0;
+    --poison: #D64545;
+    --poison-soft: #FBECEA;
+    --clean: #168A6E;
+    --clean-soft: #E6F4EF;
+    --accent: #2456D6;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+    --sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- header ---------- */
+  header { border-bottom: 1px solid var(--line); background: var(--surface); }
+  .header-inner {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding: 18px 24px;
+    flex-wrap: wrap;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+  }
+  .brand .glyph {
+    width: 26px; height: 26px;
+    display: grid; place-items: center;
+    border-radius: 7px;
+    background: var(--ink);
+    color: #fff;
+    font-size: 14px;
+  }
+  .tagline { color: var(--muted); font-size: 14px; margin: 0; }
+  .ref { margin-left: auto; color: var(--faint); font-size: 13px; font-family: var(--mono); }
+
+  /* ---------- hero metrics ---------- */
+  .hero { padding: 28px 0 8px; }
+  .hero h1 {
+    font-size: 26px;
+    margin: 0 0 4px;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+  }
+  .hero .sub { color: var(--muted); margin: 0 0 22px; font-size: 15px; max-width: 62ch; }
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .metric {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .metric .num {
+    font-family: var(--mono);
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+  .metric .num small { font-size: 15px; color: var(--muted); font-weight: 500; }
+  .metric .lbl { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .metric.good .num { color: var(--clean); }
+  .metric.hit .num { color: var(--poison); }
+
+  /* ---------- tabs ---------- */
+  .tabs { display: flex; gap: 4px; margin: 22px 0 0; border-bottom: 1px solid var(--line); }
+  .tab {
+    appearance: none;
+    border: none;
+    background: none;
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--muted);
+    padding: 12px 18px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px 6px 0 0; }
+
+  /* ---------- layout ---------- */
+  main { padding: 20px 0 48px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .rsq-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
+
+  /* ---------- query rail ---------- */
+  .queries { display: flex; flex-direction: column; gap: 10px; }
+  .qcard {
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color .12s ease, box-shadow .12s ease;
+    font-family: var(--sans);
+    color: var(--ink);
+  }
+  .qcard:hover { border-color: var(--line-strong); }
+  .qcard.active { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+  .qcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .qcard .qtext { font-size: 14px; font-weight: 500; line-height: 1.4; }
+  .qcard .qmeta { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-family: var(--mono);
+  }
+  .badge.pr_w { background: #F3E9FF; color: #7A3DD6; }
+  .badge.ipi_cem_c { background: #E7F0FF; color: #2456D6; }
+  .badge.clean { background: var(--clean-soft); color: var(--clean); }
+  .badge.poison { background: var(--poison-soft); color: var(--poison); }
+  .poison-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--poison); }
+
+  /* ---------- inspection ---------- */
+  .inspector { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .inspector-head {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .inspector-head .qtitle { font-size: 16px; font-weight: 600; margin: 0; flex: 1 1 260px; }
+  .toggle {
+    display: inline-flex;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .toggle button {
+    appearance: none;
+    border: none;
+    background: var(--surface);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 14px;
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .toggle button.active { background: var(--ink); color: #fff; }
+
+  .context-strip {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    background: #FBFCFD;
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .context-strip .g { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .context-strip .glabel { font-size: 12px; color: var(--faint); margin-right: 2px; }
+  .rank-pill {
+    font-family: var(--mono);
+    font-size: 12px;
+    width: 22px; height: 22px;
+    display: grid; place-items: center;
+    border-radius: 6px;
+    background: var(--paper);
+    border: 1px solid var(--line-strong);
+    color: var(--muted);
+  }
+  .rank-pill.removed {
+    background: var(--poison-soft);
+    border-color: var(--poison);
+    color: var(--poison);
+    text-decoration: line-through;
+  }
+  .rank-pill.kept { background: var(--clean-soft); border-color: var(--clean); color: var(--clean); }
+  .arrow { color: var(--faint); font-family: var(--mono); }
+
+  /* ---------- document list ---------- */
+  .docs { list-style: none; margin: 0; padding: 0; }
+  .doc {
+    display: grid;
+    grid-template-columns: 34px 1fr auto;
+    gap: 14px;
+    align-items: start;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+  .doc:last-child { border-bottom: none; }
+  .doc.poisoned { background: linear-gradient(90deg, var(--poison-soft) 0, transparent 6px); }
+  .doc.removed { background: #FDF3F1; }
+  .doc.tail { opacity: .62; }
+
+  .doc .r {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--faint);
+    font-weight: 500;
+    padding-top: 2px;
+  }
+  .doc .body { min-width: 0; }
+  .doc .dtext {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: #2A2F38;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .doc .dtext.expanded { -webkit-line-clamp: unset; display: block; white-space: pre-wrap; }
+  .doc .tags { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+
+  .doc .side { text-align: right; padding-top: 2px; min-width: 120px; }
+  .doc .score {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .doc .score.flagged { color: var(--poison); }
+  .doc .score.clean { color: var(--clean); }
+  .doc .score.none { color: var(--faint); font-size: 12px; font-weight: 400; }
+  .flagchip {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    margin-top: 6px;
+  }
+  .flagchip.hit { background: var(--poison); color: #fff; }
+  .flagchip.ok { background: var(--clean-soft); color: var(--clean); }
+
+  .evidence {
+    display: none;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: #F7F8FA;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .evidence.open { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 18px; }
+  .evidence .k { color: var(--faint); }
+  .evidence .v { color: var(--ink); text-align: right; }
+
+  /* ---------- RSG ---------- */
+  .rsg-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+  .rsg-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .rsg-card .num { font-family: var(--mono); font-size: 26px; font-weight: 600; }
+  .rsg-card .lbl { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  .hist-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 18px; }
+  .hist-wrap h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+  .hist-wrap .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; }
+  .hist { display: flex; align-items: flex-end; gap: 1px; height: 110px; }
+  .hist .bar { flex: 1; min-width: 1px; background: #D7DDE5; border-radius: 1px 1px 0 0; }
+  .hist .bar.poison { background: var(--poison); }
+  .legend { display: flex; gap: 18px; margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .legend .sw.clean-sw { background: #D7DDE5; }
+  .legend .sw.poison-sw { background: var(--poison); }
+
+  .flagged-list { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .flagged-list h3 { margin: 0; padding: 16px 20px; font-size: 15px; font-weight: 600; border-bottom: 1px solid var(--line); }
+  .fl-row { padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  .fl-row:last-child { border-bottom: none; }
+  .fl-row .fl-head { display: flex; align-items: center; gap: 10px; }
+  .fl-row .fl-id { font-family: var(--mono); font-size: 12px; color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fl-row .fl-text { font-size: 13px; color: #2A2F38; margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  footer { border-top: 1px solid var(--line); padding: 18px 24px; color: var(--faint); font-size: 12.5px; }
+  footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; }
+
+  .empty { padding: 40px 24px; text-align: center; color: var(--muted); }
+
+  @media (max-width: 860px) {
+    .rsq-layout { grid-template-columns: 1fr; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .rsg-stats { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="brand"><span class="glyph">◮</span>RAGSieve</div>
+    <p class="tagline">知识投毒检测 · 自引用局部对比</p>
+    <span class="ref">arXiv:2608.13010</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="hero">
+    <h1>检测检索增强生成（RAG）中的知识投毒文档</h1>
+    <p class="sub">RSQ 在查询时给 Top-5 候选打分（对照第 6–20 名），RSG 在离线阶段扫描全库。下面展示发布版演示数据上的检测效果——红 = 投毒，绿 = 干净。</p>
+    <div class="metrics" id="metrics"></div>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="rsq">RSQ · 在线检测</button>
+    <button class="tab" data-tab="rsg">RSG · 离线扫描</button>
+  </nav>
+</div>
+
+<main class="wrap">
+  <section class="panel active" id="panel-rsq">
+    <div class="rsq-layout">
+      <aside class="queries" id="queries"></aside>
+      <section class="inspector" id="inspector"></section>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-rsg">
+    <div class="rsg-stats" id="rsg-stats"></div>
+    <div class="hist-wrap">
+      <h3>全库得分分布（520 篇文档，按得分降序）</h3>
+      <p class="hint">红色竖条为投毒文档；绝大多数干净文档集中在低分区间，投毒文档明显凸起。</p>
+      <div class="hist" id="rsg-hist"></div>
+      <div class="legend">
+        <span><i class="sw clean-sw"></i>干净文档</span>
+        <span><i class="sw poison-sw"></i>投毒文档</span>
+      </div>
+    </div>
+    <div class="flagged-list">
+      <h3>被标记的文档（<span id="flagged-count"></span>）</h3>
+      <div id="flagged-rows"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>RAGSieve · 演示前端</span>
+    <span>数据源：data/demo 与 outputs/demo（预先计算，未实时加载模型）</span>
+    <a href="https://github.com/XrazyMee/RAGSieve" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</footer>
+
+<script>
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+const fmt = (n, d = 2) => (n == null ? "—" : Number(n).toFixed(d));
+
+let DATA = null;
+let activeQuery = 0;
+let activeCond = "attacked";
+
+const ATTACK_LABEL = { pr_w: "PR-W", ipi_cem_c: "CEM-C" };
+
+async function init() {
+  const res = await fetch("/api/data");
+  DATA = await res.json();
+  renderMetrics();
+  renderQueries();
+  renderInspector();
+  renderRsg();
+  bindTabs();
+}
+
+/* ---------- hero metrics ---------- */
+function renderMetrics() {
+  const rsq = DATA.metrics.rsq.macro;
+  const rsg = DATA.metrics.rsg;
+  const flagged = DATA.rsg.flagged.length;
+  const poisonTotal = DATA.rsg.docs.filter(d => d.poison).length;
+  const cleanFlagged = DATA.rsg.docs.filter(d => d.flagged && !d.poison).length;
+
+  $("#metrics").innerHTML = `
+    <div class="metric good"><div class="num">${fmt(rsq.auroc)}</div><div class="lbl">RSQ AUROC</div></div>
+    <div class="metric good"><div class="num">${fmt(rsq.tpr_at_5pct_fpr * 100, 0)}<small>%</small></div><div class="lbl">RSQ 检出率 @ 5% 误报</div></div>
+    <div class="metric good"><div class="num">${fmt(rsg.auroc)}</div><div class="lbl">RSG AUROC</div></div>
+    <div class="metric hit"><div class="num">${flagged}<small>/${poisonTotal}</small></div><div class="lbl">RSG 命中投毒 · ${cleanFlagged} 误报</div></div>
+  `;
+}
+
+/* ---------- query rail ---------- */
+function renderQueries() {
+  $("#queries").innerHTML = DATA.queries.map((q, i) => `
+    <button class="qcard ${i === activeQuery ? "active" : ""}" data-i="${i}">
+      <div class="qtext">${esc(q.query)}</div>
+      <div class="qmeta">
+        <span class="badge ${q.attack_type}">${ATTACK_LABEL[q.attack_type] || q.attack_type}</span>
+        <span class="poison-dot" title="投毒文档"></span>
+        <span class="mono" style="font-size:12px;color:var(--faint)">${q.attacked.docs.filter(d => d.poison).length} 篇投毒</span>
+      </div>
+    </button>
+  `).join("");
+
+  $$("#queries .qcard").forEach(card => card.addEventListener("click", () => {
+    activeQuery = Number(card.dataset.i);
+    renderQueries();
+    renderInspector();
+  }));
+}
+
+/* ---------- inspector (RSQ) ---------- */
+function renderInspector() {
+  const q = DATA.queries[activeQuery];
+  const cond = q[activeCond];
+
+  const head = `
+    <div class="inspector-head">
+      <h2 class="qtitle">${esc(q.query)}</h2>
+      <span class="badge ${q.attack_type}">${ATTACK_LABEL[q.attack_type] || q.attack_type}</span>
+      <div class="toggle">
+        <button data-cond="clean" class="${activeCond === "clean" ? "active" : ""}">干净检索</button>
+        <button data-cond="attacked" class="${activeCond === "attacked" ? "active" : ""}">投毒检索</button>
+      </div>
+    </div>
+  `;
+
+  const removedSet = new Set(cond.filtered.removed_ids);
+  const before = [1, 2, 3, 4, 5].map(r => {
+    const d = cond.docs[r - 1];
+    const removed = d && removedSet.has(d.document_id);
+    return `<span class="rank-pill ${removed ? "removed" : ""}" title="rank ${r}">${r}</span>`;
+  }).join("");
+  const after = cond.filtered.retained_ranks.map(r =>
+    `<span class="rank-pill kept" title="rank ${r}">${r}</span>`
+  ).join("") || `<span class="mono" style="color:var(--faint)">—</span>`;
+
+  const strip = `
+    <div class="context-strip">
+      <div class="g"><span class="glabel">生成上下文 Top-5</span>${before}</div>
+      <div class="arrow">→</div>
+      <div class="g"><span class="glabel">过滤后</span>${after}</div>
+      <div class="g" style="margin-left:auto"><span class="badge poison">移除 ${cond.filtered.removed_count} 篇</span></div>
+    </div>
+  `;
+
+  const docs = cond.docs.map(d => {
+    const isTail = d.rank > 5;
+    const removed = removedSet.has(d.document_id);
+    const rsq = d.rsq;
+
+    const tags = [];
+    tags.push(`<span class="badge ${d.poison ? "poison" : "clean"}">${d.poison ? "投毒" : "干净"}</span>`);
+    if (isTail) tags.push(`<span class="badge clean" style="background:var(--paper);color:var(--faint)">参考尾部</span>`);
+
+    let side;
+    if (rsq) {
+      const cls = rsq.flagged ? "flagged" : "clean";
+      side = `
+        <div class="score ${cls}">${fmt(rsq.score)}</div>
+        <span class="flagchip ${rsq.flagged ? "hit" : "ok"}">${rsq.flagged ? "标记 · 移除" : "保留"}</span>
+      `;
+    } else {
+      side = `<div class="score none">参考</div>`;
+    }
+
+    const evidence = rsq ? `
+      <div class="evidence">
+        <span class="k">answer-anchor</span><span class="v">${fmt(rsq.answer_anchor_evidence)}</span>
+        <span class="k">script integrity</span><span class="v">${fmt(rsq.integrity_evidence)}</span>
+        <span class="k">ppl transition</span><span class="v">${fmt(rsq.ppl_transition_evidence)}</span>
+        <span class="k">semantic tail</span><span class="v">${fmt(rsq.semantic_tail_evidence)}</span>
+        <span class="k">semantic jump</span><span class="v">${fmt(rsq.semantic_alignment_jump)}</span>
+        <span class="k">base score</span><span class="v">${fmt(rsq.base_score)}</span>
+      </div>
+    ` : "";
+
+    const cls = d.poison ? "poisoned" : (isTail ? "tail" : "");
+    return `
+      <li class="doc ${cls} ${removed ? "removed" : ""}">
+        <div class="r">${d.rank}</div>
+        <div class="body">
+          <div class="dtext" data-expand="${d.rank}">${esc(d.text)}</div>
+          <div class="tags">${tags.join("")}</div>
+          ${evidence}
+        </div>
+        <div class="side">${side}</div>
+      </li>
+    `;
+  }).join("");
+
+  $("#inspector").innerHTML = head + strip + `<ol class="docs" style="margin:0;padding:0;list-style:none">${docs}</ol>`;
+
+  $$("#inspector .toggle button").forEach(b => b.addEventListener("click", () => {
+    activeCond = b.dataset.cond;
+    renderInspector();
+  }));
+
+  $$("#inspector .dtext").forEach(el => el.addEventListener("click", () => el.classList.toggle("expanded")));
+
+  $$("#inspector .doc").forEach(row => {
+    const ev = row.querySelector(".evidence");
+    if (ev) row.querySelector(".score").addEventListener("click", () => ev.classList.toggle("open"));
+  });
+}
+
+/* ---------- RSG ---------- */
+function renderRsg() {
+  const docs = DATA.rsg.docs;
+  const flagged = DATA.rsg.flagged;
+  const poisonTotal = docs.filter(d => d.poison).length;
+  const cleanFlagged = docs.filter(d => d.flagged && !d.poison).length;
+
+  $("#rsg-stats").innerHTML = `
+    <div class="rsg-card"><div class="num" style="color:var(--ink)">${docs.length}</div><div class="lbl">全库文档</div></div>
+    <div class="rsg-card"><div class="num" style="color:var(--poison)">${flagged.length}<span style="font-size:15px;color:var(--muted)">/${poisonTotal}</span></div><div class="lbl">命中投毒文档</div></div>
+    <div class="rsg-card"><div class="num" style="color:var(--clean)">${cleanFlagged}</div><div class="lbl">干净文档误报</div></div>
+  `;
+
+  const max = Math.max(...docs.map(d => d.score), 1e-6);
+  const min = Math.min(...docs.map(d => d.score));
+  const span = (max - min) || 1;
+  $("#rsg-hist").innerHTML = docs.map(d => {
+    const h = 12 + 88 * Math.max(0.02, (d.score - min) / span);
+    const cls = d.poison ? "poison" : "bar";
+    return `<div class="bar ${cls}" style="height:${h.toFixed(1)}%" title="#${d.document_id} · score ${fmt(d.score)} · ${d.poison ? "投毒" : "干净"}"></div>`;
+  }).join("");
+
+  $("#flagged-count").textContent = flagged.length;
+  $("#flagged-rows").innerHTML = flagged.length ? flagged.map(d => `
+    <div class="fl-row">
+      <div class="fl-head">
+        <span class="badge poison">投毒</span>
+        <span class="fl-id">${esc(d.document_id)}</span>
+        <span class="mono" style="color:var(--poison);font-weight:600">score ${fmt(d.score)}</span>
+      </div>
+      <div class="fl-text">${esc(d.text)}</div>
+    </div>
+  `).join("") : `<div class="empty">未标记任何文档</div>`;
+}
+
+/* ---------- tabs ---------- */
+function bindTabs() {
+  $$(".tab").forEach(t => t.addEventListener("click", () => {
+    $$(".tab").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    $$(".panel").forEach(p => p.classList.remove("active"));
+    $("#panel-" + t.dataset.tab).classList.add("active");
+  }));
+}
+
+init();
+</script>
+</body>
+</html>
